@@ -1,180 +1,273 @@
+// src/components/ChatPreview.tsx
 import React, { useMemo, useState } from "react";
-import { Card, Space, Tabs, Button, Tag, Input, Upload, Typography } from "antd";
+import {
+  Badge,
+  Button,
+  Card,
+  Input,
+  Space,
+  Tabs,
+  Tag,
+  Typography,
+  Upload,
+} from "antd";
 import { PaperClipOutlined, SendOutlined } from "@ant-design/icons";
-import type { CommonMessage } from "../types/chat";
 
 const { Text } = Typography;
 
-type ChatPreviewProps = {
-  // patients: можно типизировать точнее, но для быстрого запуска достаточно any[]
-  patients: any[];
-  commonMessages: CommonMessage[];
+/* ---- минимальные типы ---- */
+export type RiskLevel = "high" | "medium" | "low";
+
+export type ChatMsg = {
+  id: string;
+  who: string;
+  text: string;
+  at: string; // HH:MM
+  files?: { uid?: string; name: string; size?: number }[];
+};
+
+export type Note = { id: string; text: string; at: string };
+export type Task = { id: string; text: string; due?: string; done?: boolean };
+export type RouteEvent = { id: string; date: string; toOrg: string; comment?: string };
+
+export type Patient = {
+  id: string;
+  unit: string;
+  bed: string;
+  caseId: string;
+  name: string;
+  age: string;
+  code: string;
+  risk: RiskLevel;
+  chat?: ChatMsg[];
+  tasks?: Task[];
+  routes?: RouteEvent[];
+  notes?: Note[];
+};
+
+export type CommonMessage = {
+  id: string;
+  who: string;
+  text: string;
+  at: string;
+  files?: { name: string; size?: number }[];
+};
+
+type Props = {
+  patients?: Patient[]; // ← делаю необязательным, дальше — дефолтное []
+  commonMessages?: CommonMessage[];
   onSendCommon: (text: string, files: { name: string; size?: number }[]) => void;
 };
 
-const ChatPreview: React.FC<ChatPreviewProps> = ({ patients, commonMessages, onSendCommon }) => {
-  // --- собираем данные из пациентов (минимально необходимые поля)
+const ChatPreview: React.FC<Props> = ({
+  patients = [],
+  commonMessages = [],
+  onSendCommon,
+}) => {
+  const [active, setActive] = useState<
+    "all" | "patient" | "routes" | "consults" | "tasks" | "notes" | "common"
+  >("all");
+
+  // собираем данные
   const patientChats = useMemo(() => {
     return (patients ?? [])
-      .map((p: any) => ({ p, msgs: p?.chat ?? [] }))
-      .filter((x: any) => x.msgs.length)
-      .slice(0, 50);
+      .map((p) => ({ p, msgs: p.chat ?? [] }))
+      .filter((x) => x.msgs.length)
+      .map(({ p, msgs }) => ({ p, last: msgs[msgs.length - 1]! }));
   }, [patients]);
 
-  const routes = useMemo(() => {
-    return (patients ?? []).flatMap((p: any) => (p?.routes ?? []).map((r: any) => ({ p, r })));
-  }, [patients]);
+  const tasksAll = useMemo(
+    () => (patients ?? []).flatMap((p) => (p.tasks ?? []).map((t) => ({ p, t }))),
+    [patients]
+  );
 
-  const tasksAll = useMemo(() => {
-    return (patients ?? []).flatMap((p: any) => (p?.tasks ?? []).map((t: any) => ({ p, t })));
-  }, [patients]);
+  const consults = useMemo(
+    () => tasksAll.filter((x) => x.t.text?.trim().toLowerCase().startsWith("консультация")),
+    [tasksAll]
+  );
 
-  const consults = tasksAll.filter((x: any) => x.t.text?.startsWith("Консультация:"));
-  const tasks = tasksAll.filter((x: any) => !x.t.text?.startsWith("Консультация:"));
-  const notes = useMemo(() => {
-    return (patients ?? []).flatMap((p: any) => (p?.notes ?? []).map((n: any) => ({ p, n })));
-  }, [patients]);
+  const tasks = useMemo(
+    () => tasksAll.filter((x) => !x.t.text?.trim().toLowerCase().startsWith("консультация")),
+    [tasksAll]
+  );
 
-  // --- UI helpers
-  const Item: React.FC<{
+  const routes = useMemo(
+    () => (patients ?? []).flatMap((p) => (p.routes ?? []).map((r) => ({ p, r }))),
+    [patients]
+  );
+
+  const notes = useMemo(
+    () => (patients ?? []).flatMap((p) => (p.notes ?? []).map((n) => ({ p, n }))),
+    [patients]
+  );
+
+  // общий чат — ввод
+  const [commonText, setCommonText] = useState("");
+  const [files, setFiles] = useState<any[]>([]);
+  const addFile = (file: any) => {
+    setFiles((prev) => [...prev, file]);
+    return false;
+  };
+  const removeFile = (f: any) => setFiles((prev) => prev.filter((x) => x.uid !== f.uid));
+  const send = () => {
+    const trimmed = commonText.trim();
+    const payload = files.map((f) => ({ name: f.name, size: f.size }));
+    if (!trimmed && payload.length === 0) return;
+    onSendCommon(trimmed, payload);
+    setCommonText("");
+    setFiles([]);
+  };
+
+  // мини-карточка
+  const ItemCard: React.FC<{
     title: React.ReactNode;
     meta?: React.ReactNode;
-    tinted?: "blue" | "orange" | "gray";
+    hint?: "blue" | "orange" | "gray";
     children?: React.ReactNode;
-  }> = ({ title, meta, tinted, children }) => (
+  }> = ({ title, meta, hint, children }) => (
     <Card
       size="small"
       className="rounded-xl"
-      style={{
-        background:
-          tinted === "blue" ? "#e7e9ff"
-          : tinted === "orange" ? "#ffe9e2"
-          : tinted === "gray" ? "#f3f4f6"
-          : "#fff",
+      styles={{
+        body: {
+          background:
+            hint === "blue" ? "#eef3ff" :
+            hint === "orange" ? "#fff2e8" :
+            hint === "gray" ? "#f7f7f8" : "#fff",
+        },
       }}
     >
       <Space direction="vertical" className="w-full">
         <Space style={{ width: "100%", justifyContent: "space-between" }}>
           <div style={{ fontWeight: 600 }}>{title}</div>
-          <div style={{ opacity: 0.6 }}>{meta}</div>
+          {meta ? <div style={{ opacity: 0.6 }}>{meta}</div> : null}
         </Space>
         {children}
       </Space>
     </Card>
   );
 
+  // секция с «Показать все»
   const Section: React.FC<{
     title: string;
-    onShowAll?: () => void;
+    target: "patient" | "routes" | "consults" | "tasks" | "notes" | "common";
     children: React.ReactNode;
-  }> = ({ title, onShowAll, children }) => (
+  }> = ({ title, target, children }) => (
     <div style={{ marginBottom: 12 }}>
       <Space style={{ width: "100%", justifyContent: "space-between" }}>
         <Text strong>{title}</Text>
-        {onShowAll ? (
-          <Button type="link" size="small" onClick={onShowAll}>Показать все</Button>
-        ) : null}
+        <Button type="link" size="small" onClick={() => setActive(target)}>
+          Показать все
+        </Button>
       </Space>
-      <Space direction="vertical" className="w-full">
-        {children}
-      </Space>
+      <Space direction="vertical" className="w-full">{children}</Space>
     </div>
   );
-
-  // --- Ввод «общего чата»
-  const [commonText, setCommonText] = useState("");
-  const [commonFiles, setCommonFiles] = useState<any[]>([]);
-  const addCommonFile = (file: any) => { setCommonFiles((p) => [...p, file]); return false; };
-  const removeCommonFile = (file: any) => setCommonFiles((p) => p.filter((f) => f.uid !== file.uid));
-  const sendCommon = () => {
-    const files = commonFiles.map((f: any) => ({ name: f.name, size: f.size }));
-    if (!commonText.trim() && files.length === 0) return;
-    onSendCommon(commonText, files);
-    setCommonText("");
-    setCommonFiles([]);
-  };
 
   return (
     <Card
       title="Чаты и планирование"
       className="rounded-xl"
-      bodyStyle={{ display: "flex", flexDirection: "column", maxHeight: "calc(100vh - 210px)", paddingBottom: 0 }}
+      styles={{
+        body: {
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: "calc(100vh - 210px)",
+          paddingBottom: 0,
+        },
+      }}
     >
-      {/* Контент табов */}
+      {/* прокручиваемая часть с табами */}
       <div style={{ overflow: "auto", paddingRight: 8 }}>
         <Tabs
           type="scrollable"
-          tabBarGutter={24}
+          tabBarGutter={20}
+          activeKey={active}
+          onChange={(k) => setActive(k as any)}
           items={[
             {
               key: "all",
               label: "Все",
               children: (
                 <Space direction="vertical" className="w-full">
-                  {/* Сообщения пациента */}
-                  <Section title={`Сообщения пациента • ${patientChats.length}`} onShowAll={() => window.dispatchEvent(new CustomEvent("activate-chat-tab", { detail: "patient" }))}>
-                    {patientChats.slice(0, 4).map(({ p, msgs }: any) => {
-                      const m = msgs[msgs.length - 1];
-                      return (
-                        <Item key={p.id} title={<>{p.unit} • {p.caseId} • <strong>{p.name}</strong></>} meta={m.at}>
-                          <div style={{ opacity: 0.8 }}>{m.text}</div>
-                          {m.files?.length ? (
-                            <Space wrap style={{ marginTop: 8 }}>
-                              {m.files.map((f: any, i: number) => (
-                                <Tag key={`${p.id}-${i}`} icon={<PaperClipOutlined />}>
-                                  {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
-                                </Tag>
-                              ))}
-                            </Space>
-                          ) : null}
-                        </Item>
-                      );
-                    })}
+                  <Section title={`Сообщения пациента • ${patientChats.length}`} target="patient">
+                    {patientChats.slice(0, 4).map(({ p, last }) => (
+                      <ItemCard
+                        key={p.id}
+                        title={<>{p.unit} • {p.caseId} • <strong>{p.name}</strong></>}
+                        meta={last.at}
+                      >
+                        <div style={{ opacity: 0.85 }}>{last.text}</div>
+                        {last.files?.length ? (
+                          <Space wrap style={{ marginTop: 6 }}>
+                            {last.files.map((f, i) => (
+                              <Tag key={`${p.id}-${i}`} icon={<PaperClipOutlined />}>
+                                {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
+                              </Tag>
+                            ))}
+                          </Space>
+                        ) : null}
+                      </ItemCard>
+                    ))}
                   </Section>
 
-                  {/* Маршрутизация */}
-                  <Section title={`Маршрутизация • ${routes.length}`} onShowAll={() => window.dispatchEvent(new CustomEvent("activate-chat-tab", { detail: "routes" }))}>
-                    {routes.slice(0, 3).map(({ p, r }: any) => (
-                      <Item key={r.id} tinted="orange" title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={new Date(r.date).toLocaleDateString()}>
+                  <Section title={`Маршрутизация • ${routes.length}`} target="routes">
+                    {routes.slice(0, 3).map(({ p, r }) => (
+                      <ItemCard
+                        key={r.id}
+                        hint="orange"
+                        title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                        meta={new Date(r.date).toLocaleDateString()}
+                      >
                         Перевод → <strong>{r.toOrg}</strong>{r.comment ? ` • ${r.comment}` : ""}
-                      </Item>
+                      </ItemCard>
                     ))}
                   </Section>
 
-                  {/* Консультации */}
-                  <Section title={`Консультации • ${consults.length}`} onShowAll={() => window.dispatchEvent(new CustomEvent("activate-chat-tab", { detail: "consults" }))}>
-                    {consults.slice(0, 3).map(({ p, t }: any) => (
-                      <Item key={t.id} tinted="blue" title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={t.due ? new Date(t.due).toLocaleDateString() : ""}>
+                  <Section title={`Консультации • ${consults.length}`} target="consults">
+                    {consults.slice(0, 3).map(({ p, t }) => (
+                      <ItemCard
+                        key={t.id}
+                        hint="blue"
+                        title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                        meta={t.due ? new Date(t.due).toLocaleDateString() : ""}
+                      >
                         {t.text}
-                      </Item>
+                      </ItemCard>
                     ))}
                   </Section>
 
-                  {/* Задачи */}
-                  <Section title={`Задачи • ${tasks.length}`} onShowAll={() => window.dispatchEvent(new CustomEvent("activate-chat-tab", { detail: "tasks" }))}>
-                    {tasks.slice(0, 3).map(({ p, t }: any) => (
-                      <Item key={t.id} title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={t.due ? new Date(t.due).toLocaleDateString() : ""}>
+                  <Section title={`Задачи • ${tasks.length}`} target="tasks">
+                    {tasks.slice(0, 3).map(({ p, t }) => (
+                      <ItemCard
+                        key={t.id}
+                        title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                        meta={t.due ? new Date(t.due).toLocaleDateString() : ""}
+                      >
                         {t.text}
-                      </Item>
+                      </ItemCard>
                     ))}
                   </Section>
 
-                  {/* Записи */}
-                  <Section title={`Записи • ${notes.length}`} onShowAll={() => window.dispatchEvent(new CustomEvent("activate-chat-tab", { detail: "notes" }))}>
-                    {notes.slice(0, 3).map(({ p, n }: any) => (
-                      <Item key={n.id} tinted="gray" title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={new Date(n.at).toLocaleDateString()}>
+                  <Section title={`Записи • ${notes.length}`} target="notes">
+                    {notes.slice(0, 3).map(({ p, n }) => (
+                      <ItemCard
+                        key={n.id}
+                        hint="gray"
+                        title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                        meta={new Date(n.at).toLocaleDateString()}
+                      >
                         {n.text}
-                      </Item>
+                      </ItemCard>
                     ))}
                   </Section>
 
-                  {/* Общий чат */}
-                  <Section title={`Общий чат • ${commonMessages.length}`} onShowAll={() => window.dispatchEvent(new CustomEvent("activate-chat-tab", { detail: "common" }))}>
+                  <Section title={`Общий чат • ${commonMessages.length}`} target="common">
                     {commonMessages.slice(-3).map((m) => (
-                      <Item key={m.id} title={m.who} meta={m.at}>
+                      <ItemCard key={m.id} title={m.who} meta={m.at}>
                         {m.text}
                         {m.files?.length ? (
-                          <Space wrap style={{ marginTop: 8 }}>
+                          <Space wrap style={{ marginTop: 6 }}>
                             {m.files.map((f, i) => (
                               <Tag key={`${m.id}-${i}`} icon={<PaperClipOutlined />}>
                                 {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
@@ -182,124 +275,198 @@ const ChatPreview: React.FC<ChatPreviewProps> = ({ patients, commonMessages, onS
                             ))}
                           </Space>
                         ) : null}
-                      </Item>
+                      </ItemCard>
                     ))}
                   </Section>
                 </Space>
               ),
             },
+
             {
               key: "patient",
               label: "Новые сообщения",
               children: (
                 <Space direction="vertical" className="w-full">
-                  {patientChats.map(({ p, msgs }: any) => {
-                    const m = msgs[msgs.length - 1];
-                    return (
-                      <Item key={p.id} title={<>{p.unit} • {p.caseId} • <strong>{p.name}</strong></>} meta={m.at}>
-                        <div style={{ opacity: 0.8 }}>{m.text}</div>
-                        {m.files?.length ? (
-                          <Space wrap style={{ marginTop: 8 }}>
-                            {m.files.map((f: any, i: number) => (
-                              <Tag key={`${p.id}-${i}`} icon={<PaperClipOutlined />}>
-                                {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
-                              </Tag>
-                            ))}
-                          </Space>
-                        ) : null}
-                        <Space style={{ marginTop: 6 }}>
-                          <Button size="small" onClick={() => window.location.assign(`/patient/${p.id}/chat`)}>Открыть чат</Button>
+                  {patientChats.map(({ p, last }) => (
+                    <ItemCard
+                      key={p.id}
+                      title={<>{p.unit} • {p.caseId} • <strong>{p.name}</strong></>}
+                      meta={last.at}
+                    >
+                      <div style={{ opacity: 0.85 }}>{last.text}</div>
+                      {last.files?.length ? (
+                        <Space wrap style={{ marginTop: 6 }}>
+                          {last.files.map((f, i) => (
+                            <Tag key={`${p.id}-${i}`} icon={<PaperClipOutlined />}>
+                              {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
+                            </Tag>
+                          ))}
                         </Space>
-                      </Item>
-                    );
-                  })}
+                      ) : null}
+                      <Space style={{ marginTop: 8 }}>
+                        <Button size="small" onClick={() => window.location.assign(`/patient/${p.id}/chat`)}>
+                          Открыть чат
+                        </Button>
+                      </Space>
+                    </ItemCard>
+                  ))}
                 </Space>
               ),
             },
-            { key: "routes", label: "Маршрутизация", children: (
-              <Space direction="vertical" className="w-full">
-                {routes.map(({ p, r }: any) => (
-                  <Item key={r.id} tinted="orange" title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={new Date(r.date).toLocaleDateString()}>
-                    Перевод → <strong>{r.toOrg}</strong>{r.comment ? ` • ${r.comment}` : ""}
-                  </Item>
-                ))}
-              </Space>
-            )},
-            { key: "consults", label: "Консультации", children: (
-              <Space direction="vertical" className="w-full">
-                {consults.map(({ p, t }: any) => (
-                  <Item key={t.id} tinted="blue" title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={t.due ? new Date(t.due).toLocaleDateString() : ""}>
-                    {t.text}
-                  </Item>
-                ))}
-              </Space>
-            )},
-            { key: "tasks", label: "Задачи", children: (
-              <Space direction="vertical" className="w-full">
-                {tasks.map(({ p, t }: any) => (
-                  <Item key={t.id} title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={t.due ? new Date(t.due).toLocaleDateString() : ""}>
-                    {t.text}
-                  </Item>
-                ))}
-              </Space>
-            )},
-            { key: "notes", label: "Записи", children: (
-              <Space direction="vertical" className="w-full">
-                {notes.map(({ p, n }: any) => (
-                  <Item key={n.id} tinted="gray" title={<><Tag bordered>{p.unit}</Tag> {p.name}</>} meta={new Date(n.at).toLocaleDateString()}>
-                    {n.text}
-                  </Item>
-                ))}
-              </Space>
-            )},
-            { key: "common", label: "Общий чат", children: (
-              <Space direction="vertical" className="w-full">
-                {commonMessages.map((m) => (
-                  <Item key={m.id} title={m.who} meta={m.at}>
-                    {m.text}
-                    {m.files?.length ? (
-                      <Space wrap style={{ marginTop: 8 }}>
-                        {m.files.map((f, i) => (
-                          <Tag key={`${m.id}-${i}`} icon={<PaperClipOutlined />}>
-                            {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
-                          </Tag>
-                        ))}
-                      </Space>
-                    ) : null}
-                  </Item>
-                ))}
-              </Space>
-            )},
+
+            {
+              key: "routes",
+              label: "Маршрутизация",
+              children: (
+                <Space direction="vertical" className="w-full">
+                  {routes.map(({ p, r }) => (
+                    <ItemCard
+                      key={r.id}
+                      hint="orange"
+                      title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                      meta={new Date(r.date).toLocaleDateString()}
+                    >
+                      Перевод → <strong>{r.toOrg}</strong>{r.comment ? ` • ${r.comment}` : ""}
+                    </ItemCard>
+                  ))}
+                </Space>
+              ),
+            },
+
+            {
+              key: "consults",
+              label: "Консультации",
+              children: (
+                <Space direction="vertical" className="w-full">
+                  {consults.map(({ p, t }) => (
+                    <ItemCard
+                      key={t.id}
+                      hint="blue"
+                      title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                      meta={t.due ? new Date(t.due).toLocaleDateString() : ""}
+                    >
+                      {t.text}
+                    </ItemCard>
+                  ))}
+                </Space>
+              ),
+            },
+
+            {
+              key: "tasks",
+              label: "Задачи",
+              children: (
+                <Space direction="vertical" className="w-full">
+                  {tasks.map(({ p, t }) => (
+                    <ItemCard
+                      key={t.id}
+                      title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                      meta={t.due ? new Date(t.due).toLocaleDateString() : ""}
+                    >
+                      {t.text}
+                    </ItemCard>
+                  ))}
+                </Space>
+              ),
+            },
+
+            {
+              key: "notes",
+              label: "Записи",
+              children: (
+                <Space direction="vertical" className="w-full">
+                  {notes.map(({ p, n }) => (
+                    <ItemCard
+                      key={n.id}
+                      hint="gray"
+                      title={<><Tag bordered>{p.unit}</Tag> {p.name}</>}
+                      meta={new Date(n.at).toLocaleDateString()}
+                    >
+                      {n.text}
+                    </ItemCard>
+                  ))}
+                </Space>
+              ),
+            },
+
+            {
+              key: "common",
+              label: "Общий чат",
+              children: (
+                <Space direction="vertical" className="w-full">
+                  {commonMessages.map((m) => (
+                    <ItemCard key={m.id} title={m.who} meta={m.at}>
+                      {m.text}
+                      {m.files?.length ? (
+                        <Space wrap style={{ marginTop: 6 }}>
+                          {m.files.map((f, i) => (
+                            <Tag key={`${m.id}-${i}`} icon={<PaperClipOutlined />}>
+                              {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : null}
+                    </ItemCard>
+                  ))}
+                </Space>
+              ),
+            },
           ]}
         />
       </div>
 
-      {/* Нижняя панель ввода в ОБЩИЙ ЧАТ */}
-      <div style={{ position: "sticky", bottom: 0, background: "#fff", marginTop: 8, paddingTop: 8, paddingBottom: 8, borderTop: "1px solid #f0f0f0" }}>
-        {commonFiles.length > 0 && (
+      {/* нижняя липкая панель ввода общего чата */}
+      <div
+        style={{
+          position: "sticky",
+          bottom: 0,
+          background: "#fff",
+          marginTop: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          borderTop: "1px solid #f0f0f0",
+        }}
+      >
+        {files.length > 0 && (
           <Space wrap style={{ marginBottom: 8 }}>
-            {commonFiles.map((f: any) => (
-              <Tag key={f.uid} closable onClose={(e) => { e.preventDefault(); removeCommonFile(f); }} icon={<PaperClipOutlined />}>
+            {files.map((f: any) => (
+              <Tag
+                key={f.uid}
+                closable
+                onClose={(e) => { e.preventDefault(); removeFile(f); }}
+                icon={<PaperClipOutlined />}
+              >
                 {f.name}{typeof f.size === "number" ? ` • ${(f.size / 1024).toFixed(1)} КБ` : ""}
               </Tag>
             ))}
           </Space>
         )}
 
-        <div style={{ border: "1px solid #e6efec", background: "#f7f9f8", borderRadius: 14, padding: 6, display: "flex", alignItems: "flex-end", gap: 6 }}>
-          <Upload multiple showUploadList={false} beforeUpload={addCommonFile}>
+        <div
+          style={{
+            border: "1px solid #e6efec",
+            background: "#f7f9f8",
+            borderRadius: 14,
+            padding: 6,
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 6,
+          }}
+        >
+          <Upload multiple showUploadList={false} beforeUpload={addFile}>
             <Button type="text" icon={<PaperClipOutlined />} />
           </Upload>
+
           <Input.TextArea
             value={commonText}
             onChange={(e) => setCommonText(e.target.value)}
             autoSize={{ minRows: 1, maxRows: 4 }}
             placeholder="Введите сообщение"
-            bordered={false}
-            onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); sendCommon(); } }}
+            variant="borderless"   // вместо deprecated bordered
+            onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); send(); } }}
             style={{ background: "transparent" }}
           />
-          <Button type="text" shape="circle" icon={<SendOutlined />} onClick={sendCommon} />
+          <Button type="text" shape="circle" icon={<SendOutlined />} onClick={send} />
         </div>
       </div>
     </Card>
@@ -307,4 +474,3 @@ const ChatPreview: React.FC<ChatPreviewProps> = ({ patients, commonMessages, onS
 };
 
 export default ChatPreview;
-export type { CommonMessage };
